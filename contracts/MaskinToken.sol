@@ -6,6 +6,7 @@ import './delegate/CanDelegateToken.sol';
 import './delegate/DelegateToken.sol';
 import './TraceableToken.sol';
 import './WithdrawalToken.sol';
+import './base-token/BalanceSheet.sol';
 
 
 /**
@@ -36,6 +37,8 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
   address public wallet;  // system wallet
   event ChangeWallet(address indexed addr);
 
+  address public storageToken;
+
   uint8 public holdersPaidRate;  // %
   uint8 public systemPaidRate;   // %
   uint8 public writerPaidRate;   // %
@@ -43,14 +46,20 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
 
   event Mint(address indexed to, uint256 value);
 
-  constructor(address _wallet) public {
-    _mint(msg.sender, INITIAL_SUPPLY);
-
-    wallet = _wallet;
+  constructor(address _wallet, address _storageToken) public {
+    wallet          = _wallet;
+    storageToken    = _storageToken;
 
     systemPaidRate  = 10;
     writerPaidRate  = 70;
     holdersPaidRate = 20;
+  }
+
+  /**
+   * @dev Mints a initial amount of tokens for owner
+   */
+  function preMint() public onlyOwner {
+    _mint(msg.sender, INITIAL_SUPPLY);
   }
 
   /**
@@ -67,13 +76,13 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
   {
     uint256 _forWriter = _amount.mul(writerPaidRate).div(100);
     require(_forWriter > 0);
+    _mint(_writer, _forWriter);
 
     uint256 _forHolders = _amount.mul(holdersPaidRate).div(100);
     if (_forHolders > 0) {
-      _mintToAllHolders(_forHolders);
+      _mint(storageToken, _forHolders);
     }
 
-    _mint(_writer, _forWriter);
 
     uint256 _forSystem = _amount.sub(_forWriter).sub(_forHolders);
     if (_forSystem > 0) {
@@ -122,6 +131,16 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
     super.transferOwnership(_newOwner);
   }
 
-  function _mintToAllHolders(uint256 /*_amount*/) internal {
+  /**
+   * @dev Allows transfer token from a given address to any addresses
+   * @param _from The address to transfer token from.
+   * @param _holders List of addresses token transferred to
+   * @param _amount Amount of token which each address will be received respectively.
+   */
+  function _distribute(address _from, address[] _holders, uint256[] _amount) public {
+    uint256 totalReceiver = _holders.length;
+    for(uint256 i = 0; i < totalReceiver; i++) {
+      super._transfer(_from, _holders[i], _amount[i]);
+    }
   }
 }
