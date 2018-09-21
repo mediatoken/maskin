@@ -6,7 +6,6 @@ import './delegate/CanDelegateToken.sol';
 import './delegate/DelegateToken.sol';
 import './TraceableToken.sol';
 import './WithdrawalToken.sol';
-import './base-token/BalanceSheet.sol';
 
 
 /**
@@ -39,6 +38,8 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
 
   address public storageToken;
 
+  bool public initialMint;
+
   uint8 public holdersPaidRate;  // %
   uint8 public systemPaidRate;   // %
   uint8 public writerPaidRate;   // %
@@ -53,13 +54,24 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
     systemPaidRate  = 10;
     writerPaidRate  = 70;
     holdersPaidRate = 20;
+
+    initialMint     = false;
+  }
+
+  /**
+   * @dev Throws if calling preMint is not in the first time.
+   */
+  modifier onlyInitialMint() {
+    require(initialMint == false);
+    _;
   }
 
   /**
    * @dev Mints a initial amount of tokens for owner
    */
-  function preMint() public onlyOwner {
+  function preMint() public onlyOwner onlyInitialMint {
     _mint(msg.sender, INITIAL_SUPPLY);
+    initialMint = true;
   }
 
   /**
