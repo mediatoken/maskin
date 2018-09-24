@@ -35,8 +35,9 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
 
   address public wallet;  // system wallet
   event ChangeWallet(address indexed addr);
+  event ChangeDeputation(address indexed addr);
 
-  address public storageToken;
+  address public deputation;
 
   bool public initialMint;
 
@@ -47,9 +48,9 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
 
   event Mint(address indexed to, uint256 value);
 
-  constructor(address _wallet, address _storageToken) public {
+  constructor(address _wallet, address _deputation) public {
     wallet          = _wallet;
-    storageToken    = _storageToken;
+    deputation      = _deputation;
 
     systemPaidRate  = 10;
     writerPaidRate  = 70;
@@ -61,7 +62,7 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
   /**
    * @dev Throws if calling preMint is not in the first time.
    */
-  modifier onlyInitialMint() {
+  modifier onlyOnInit() {
     require(initialMint == false);
     _;
   }
@@ -69,7 +70,7 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
   /**
    * @dev Mints a initial amount of tokens for owner
    */
-  function preMint() public onlyOwner onlyInitialMint {
+  function preMint() public onlyOwner onlyOnInit {
     _mint(msg.sender, INITIAL_SUPPLY);
     initialMint = true;
   }
@@ -92,7 +93,7 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
 
     uint256 _forHolders = _amount.mul(holdersPaidRate).div(100);
     if (_forHolders > 0) {
-      _mint(storageToken, _forHolders);
+      _mint(deputation, _forHolders);
     }
 
 
@@ -134,6 +135,17 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
   }
 
   /**
+   * @dev Change address of the deputation.
+   * @param _deputation The new deputation address.
+   */
+  function changeDeputation(address _deputation) public onlyAdmin {
+    require(_deputation != address(0), "new deputation address cannot be 0x0");
+    deputation = _deputation;
+
+    emit ChangeDeputation(_deputation);
+  }
+
+  /**
    * @dev Allows the current owner to transfer control of the contract to a new owner.
    * @param _newOwner The address to transfer ownership to.
    */
@@ -141,18 +153,5 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
     // do not allow self ownership
     require(_newOwner != address(this));
     super.transferOwnership(_newOwner);
-  }
-
-  /**
-   * @dev Allows transfer token from a given address to any addresses
-   * @param _from The address to transfer token from.
-   * @param _holders List of addresses token transferred to
-   * @param _amount Amount of token which each address will be received respectively.
-   */
-  function _distribute(address _from, address[] _holders, uint256[] _amount) public {
-    uint256 totalReceiver = _holders.length;
-    for(uint256 i = 0; i < totalReceiver; i++) {
-      super._transfer(_from, _holders[i], _amount[i]);
-    }
   }
 }
