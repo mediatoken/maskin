@@ -2,7 +2,8 @@ pragma solidity ^0.4.24;
 
 import './MaskinToken.sol';
 
-/*
+
+/**
  * This contract holds tokens which will be transferred to all holders in the future
  */
 contract Deputation {
@@ -24,11 +25,12 @@ contract Deputation {
   }
 
   /**
-   * @dev Allows transfer token from a given address to any addresses
+   * @dev Allows transfer token from this contract to token holders
    * @param _holders List of addresses token transferred to
    * @param _amounts Amount of token which each address will be received respectively.
    */
   function distribute(address[] _holders, uint256[] _amounts) public {
+    require(address(token) != 0);
     uint256 _totalReceiver = _holders.length;
     require(_totalReceiver == _amounts.length);
     for(uint256 _i = 0; _i < _totalReceiver; _i++) {

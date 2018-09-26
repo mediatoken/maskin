@@ -96,7 +96,6 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
       _mint(deputation, _forHolders);
     }
 
-
     uint256 _forSystem = _amount.sub(_forWriter).sub(_forHolders);
     if (_forSystem > 0) {
       _mint(wallet, _forSystem);
