@@ -1,6 +1,3 @@
-const fs = require('fs');
-const path = require('path');
-const readEachLineSync = require('read-each-line-sync');
 const web3ABI = require('web3-eth-abi');
 
 const BigNumber = web3.BigNumber;
@@ -19,7 +16,7 @@ const WithdrawalToken   = require("./WithdrawalToken.js");
 const TraceableToken    = require("./TraceableToken.js");
 const DelegateToken     = require("./delegate/DelegateToken.js");
 const ClaimableEx       = require("./ownership/ClaimableEx.js");
-const StandartToken     = require("./base-token/StandardToken.js");
+const StandardToken     = require("./base-token/StandardToken.js");
 const PausableToken     = require("./base-token/PausableToken.js");
 const CanReclaimToken   = require("./zeppelin/contracts/ownership/CanReclaimToken.js");
 
@@ -34,13 +31,8 @@ contract('MaskinToken', function (accounts) {
   const guess                   = accounts[6];
 
   const TEN_THOUSAND_TOKENS     = bn.tokens(10000);
-  const HUNDRED_TOKENS          = bn.tokens(100);
-  const TEN_TOKENS              = bn.tokens(10);
-
-  const ListAddressesFilename   = './helpers/ThousandAddresses.txt';
 
   var MaskinTokenInstance, DeputationInstance, BalanceSheetInstance;
-  var ListAddresses = [];
 
   beforeEach(async function () {
     BalanceSheetInstance  = await BalanceSheet.new({from:ownerBalanceSheet}).should.be.fulfilled;
@@ -49,8 +41,6 @@ contract('MaskinToken', function (accounts) {
 
     await BalanceSheetInstance.transferOwnership(MaskinTokenInstance.address, {from:ownerBalanceSheet}).should.be.fulfilled;
     await MaskinTokenInstance.setBalanceSheet(BalanceSheetInstance.address).should.be.fulfilled;
-
-    await MaskinTokenInstance.preMint({from: ownerToken}).should.be.fulfilled;
 
     var web3 = HasAdmin.web3;
 
@@ -75,20 +65,24 @@ contract('MaskinToken', function (accounts) {
     );
 
     await web3.eth.sendTransaction({from: ownerToken, to: MaskinTokenInstance.address, value: 0, data: addAdminFunc, gas: 3000000});
-
-    readEachLineSync(path.resolve(__dirname, ListAddressesFilename), function(line) {
-      ListAddresses.push(line);
-    });
   });
 
   describe("preMint()", function() {
     it("Balance of Maskin token owner should be INITIAL_SUPPLY at beginning time", async function() {
-      let balanceOwner = await MaskinTokenInstance.balanceOf(ownerToken);
-      var totalTokens = await MaskinTokenInstance.INITIAL_SUPPLY();
-      balanceOwner.should.be.bignumber.equal(totalTokens);
+      let previousBalanceOwner = await MaskinTokenInstance.balanceOf(ownerToken);
+      assert.equal(previousBalanceOwner, 0);
+
+      await MaskinTokenInstance.preMint({from: ownerToken}).should.be.fulfilled;
+
+      let totalInitTokens = await MaskinTokenInstance.INITIAL_SUPPLY();
+      let afterBalanceOwner = await MaskinTokenInstance.balanceOf(ownerToken);
+
+      afterBalanceOwner.minus(totalInitTokens).should.be.bignumber.equal(previousBalanceOwner);
     });
 
     it("Should reject if calling preMint() one more time", async function() {
+      await MaskinTokenInstance.preMint({from: ownerToken}).should.be.fulfilled;
+
       await MaskinTokenInstance.preMint({from: ownerToken}).should.be.rejected;
     });
 
@@ -98,32 +92,29 @@ contract('MaskinToken', function (accounts) {
   });
 
   describe("mint()", function() {
+    beforeEach(async function () {
+      await MaskinTokenInstance.preMint({from: ownerToken}).should.be.fulfilled;
+    });
+
     it("Should allow mint tokens whenever writer posts new article if caller is admin", async function() {
+      let previousWriterBalance = await MaskinTokenInstance.balanceOf(writer).should.be.fulfilled;
+      let previousAllHoldersBalance = await MaskinTokenInstance.balanceOf(DeputationInstance.address).should.be.fulfilled;
+      let previousSystemWalletBalance = await MaskinTokenInstance.balanceOf(system_wallet).should.be.fulfilled;
+
+      assert.equal(previousWriterBalance, 0);
+      assert.equal(previousAllHoldersBalance, 0);
+      assert.equal(previousSystemWalletBalance, 0);
+
       await DeputationInstance.setToken(MaskinTokenInstance.address, {from: deputation}).should.be.fulfilled;
       await MaskinTokenInstance.mint(writer, TEN_THOUSAND_TOKENS, {from: admin}).should.be.fulfilled;
 
-      const TOTAL = 20;
-      let holders = ListAddresses.slice(0, TOTAL);
-      let amounts = [];
-      for(let i = 0; i < TOTAL; i++) {
-        amounts.push(HUNDRED_TOKENS);
-      }
+      let afterWriterBalance = await MaskinTokenInstance.balanceOf(writer).should.be.fulfilled;
+      let afterAllHoldersBalance = await MaskinTokenInstance.balanceOf(DeputationInstance.address).should.be.fulfilled;
+      let afterSystemWalletBalance = await MaskinTokenInstance.balanceOf(system_wallet).should.be.fulfilled;
 
-      let writerBalance = await MaskinTokenInstance.balanceOf(writer).should.be.fulfilled;
-      let allHoldersBalance = await MaskinTokenInstance.balanceOf(DeputationInstance.address).should.be.fulfilled;
-      let systemWalletBalance = await MaskinTokenInstance.balanceOf(system_wallet).should.be.fulfilled;
-
-      writerBalance.should.be.bignumber.equal(bn.tokens(7000));
-      allHoldersBalance.should.be.bignumber.equal(bn.tokens(2000));
-      systemWalletBalance.should.be.bignumber.equal(bn.tokens(1000));
-
-      await DeputationInstance.distribute(holders, amounts).should.be.fulfilled;
-
-      let holderBalance;
-      for(let i = 0; i < TOTAL; i++) {
-        holderBalance = await MaskinTokenInstance.balanceOf(holders[i]).should.be.fulfilled;
-        holderBalance.should.be.bignumber.equal(HUNDRED_TOKENS);
-      }
+      afterWriterBalance.minus(bn.tokens(7000)).should.be.bignumber.equal(previousWriterBalance);
+      afterAllHoldersBalance.minus(bn.tokens(2000)).should.be.bignumber.equal(previousAllHoldersBalance);
+      afterSystemWalletBalance.minus(bn.tokens(1000)).should.be.bignumber.equal(previousSystemWalletBalance);
     });
 
     it("Should reject mint if caller is not admin ", async function() {
@@ -151,15 +142,23 @@ contract('MaskinToken', function (accounts) {
       assert.equal(systemPaidRate, 20);
       assert.equal(writerPaidRate, 60);
 
+      let previousWriterBalance = await MaskinTokenInstance.balanceOf(writer).should.be.fulfilled;
+      let previousAllHoldersBalance = await MaskinTokenInstance.balanceOf(DeputationInstance.address).should.be.fulfilled;
+      let previousSystemWalletBalance = await MaskinTokenInstance.balanceOf(system_wallet).should.be.fulfilled;
+
+      assert.equal(previousWriterBalance, 0);
+      assert.equal(previousAllHoldersBalance, 0);
+      assert.equal(previousSystemWalletBalance, 0);
+
       await MaskinTokenInstance.mint(writer, TEN_THOUSAND_TOKENS, {from: admin}).should.be.fulfilled;
 
-      let writerBalance = await MaskinTokenInstance.balanceOf(writer).should.be.fulfilled;
-      let allHoldersBalance = await MaskinTokenInstance.balanceOf(DeputationInstance.address).should.be.fulfilled;
-      let systemWalletBalance = await MaskinTokenInstance.balanceOf(system_wallet).should.be.fulfilled;
+      let afterWriterBalance = await MaskinTokenInstance.balanceOf(writer).should.be.fulfilled;
+      let afterAllHoldersBalance = await MaskinTokenInstance.balanceOf(DeputationInstance.address).should.be.fulfilled;
+      let afterSystemWalletBalance = await MaskinTokenInstance.balanceOf(system_wallet).should.be.fulfilled;
 
-      writerBalance.should.be.bignumber.equal(bn.tokens(6000));
-      allHoldersBalance.should.be.bignumber.equal(bn.tokens(2000));
-      systemWalletBalance.should.be.bignumber.equal(bn.tokens(2000));
+      afterWriterBalance.minus(bn.tokens(6000)).should.be.bignumber.equal(previousWriterBalance);
+      afterAllHoldersBalance.minus(bn.tokens(2000)).should.be.bignumber.equal(previousAllHoldersBalance);
+      afterSystemWalletBalance.minus(bn.tokens(2000)).should.be.bignumber.equal(previousSystemWalletBalance);
     });
 
     it("Should reject if caller is not admin", async function() {
@@ -317,8 +316,8 @@ contract('MaskinToken', function (accounts) {
     TraceableToken.check(accounts, deployContract);
   });
 
-  describe('StandartToken', function() {
-    StandartToken.check(accounts, deployContract);
+  describe('StandardToken', function() {
+    StandardToken.check(accounts, deployContract);
   });
 
   describe('PausableToken', function() {

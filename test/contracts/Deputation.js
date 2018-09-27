@@ -11,10 +11,10 @@ const should = require('chai')
 
 const bn = require('./helpers/bignumber.js');
 
-const MaskinToken       = artifacts.require("./MaskinToken.sol");
-const Deputation        = artifacts.require("./Deputation.sol");
-const BalanceSheet      = artifacts.require("./BalanceSheet.sol");
-const HasAdmin          = artifacts.require("./HasAdmin.sol");
+const MaskinToken   = artifacts.require("./MaskinToken.sol");
+const Deputation    = artifacts.require("./Deputation.sol");
+const BalanceSheet  = artifacts.require("./BalanceSheet.sol");
+const HasAdmin      = artifacts.require("./HasAdmin.sol");
 
 
 contract('Deputation', function(accounts) {
@@ -27,10 +27,11 @@ contract('Deputation', function(accounts) {
   const guess                   = accounts[6];
 
   const TEN_THOUSAND_TOKENS     = bn.tokens(10000);
+  const THOUSAND_TOKENS         = bn.tokens(1000);
   const HUNDRED_TOKENS          = bn.tokens(100);
   const TEN_TOKENS              = bn.tokens(10);
 
-  const ListAddressesFilename   = './helpers/ThousandAddresses.txt';
+  const ListAddressesFilename   = './helpers/Addresses.txt';
 
   var MaskinTokenInstance, DeputationInstance, BalanceSheetInstance;
   var ListAddresses = [];
@@ -68,14 +69,26 @@ contract('Deputation', function(accounts) {
     );
 
     await web3.eth.sendTransaction({from: ownerToken, to: MaskinTokenInstance.address, value: 0, data: addAdminFunc, gas: 3000000});
-
-    readEachLineSync(path.resolve(__dirname, ListAddressesFilename), function(line) {
-      ListAddresses.push(line);
-    });
+    await web3.eth.sendTransaction({from: deputation, to: DeputationInstance.address, value: 0, data: addAdminFunc, gas: 3000000});
   });
 
   describe("setToken()", function() {
-    it("Should allow set new token address", async function() {
+    it("Should allow set new token address if caller is owner", async function() {
+      let token;
+      token = await DeputationInstance.token().should.be.fulfilled;
+      assert.equal(token, 0);
+
+      await DeputationInstance.setToken(MaskinTokenInstance.address, {from: deputation}).should.be.fulfilled;
+
+      token = await DeputationInstance.token().should.be.fulfilled;
+      assert.equal(token, MaskinTokenInstance.address);
+    });
+
+    it("Should reject set new token address if caller is not owner", async function() {
+      await DeputationInstance.setToken(MaskinTokenInstance.address, {from: guess}).should.be.rejected;
+    });
+
+    it("Catch event log", async function() {
       const {logs} = await DeputationInstance.setToken(MaskinTokenInstance.address, {from: deputation}).should.be.fulfilled;
       const setTokenLog = logs.find(e => e.event === 'SetToken');
       setTokenLog.should.exist;
@@ -84,49 +97,99 @@ contract('Deputation', function(accounts) {
   });
 
   describe("distribute()", function() {
-    const TOTAL = 20;
+    var TOTAL = 20;
     let holders;
     let amounts = [];
 
     beforeEach(async function () {
+      readEachLineSync(path.resolve(__dirname, ListAddressesFilename), function(line) {
+        ListAddresses.push(line);
+      });
+
       await MaskinTokenInstance.mint(writer, TEN_THOUSAND_TOKENS, {from: admin}).should.be.fulfilled;
 
       holders = ListAddresses.slice(0, TOTAL);
       for(let i = 0; i < TOTAL; i++) {
-        amounts.push(HUNDRED_TOKENS);
+        amounts[i] = HUNDRED_TOKENS;
       }
     });
 
-    it("Should allow tokens to holders", async function() {
+    it("Should allow distribute tokens to holders if caller is admin", async function() {
+      let previousHolderBalance = [];
+      let afterHolderBalance = [];
+
+      for(let i = 0; i < TOTAL; i++) {
+        previousHolderBalance[i] = await MaskinTokenInstance.balanceOf(holders[i]).should.be.fulfilled;
+        assert.equal(previousHolderBalance[i], 0);
+      }
+
       await DeputationInstance.setToken(MaskinTokenInstance.address, {from: deputation}).should.be.fulfilled;
 
-      const {logs} = await DeputationInstance.distribute(holders, amounts).should.be.fulfilled;
+      await DeputationInstance.distribute(holders, amounts, {from: admin}).should.be.fulfilled;
 
-      let holderBalance;
       for(let i = 0; i < TOTAL; i++) {
-        holderBalance = await MaskinTokenInstance.balanceOf(holders[i]).should.be.fulfilled;
-        holderBalance.should.be.bignumber.equal(HUNDRED_TOKENS);
+        afterHolderBalance[i] = await MaskinTokenInstance.balanceOf(holders[i]).should.be.fulfilled;
+        afterHolderBalance[i].minus(HUNDRED_TOKENS).should.be.bignumber.equal(previousHolderBalance[i]);
+      }
+    });
+
+    it("Should allow call distribute function many times util transferring tokens to all specified holders", async function() {
+      await DeputationInstance.setToken(MaskinTokenInstance.address, {from: deputation}).should.be.fulfilled;
+
+      for(let i = 0; i < TOTAL; i++) {
+        amounts[i] = TEN_TOKENS;
       }
 
-      const distributeLog = logs.find(e => e.event === 'FundsDistributed');
-      distributeLog.should.exist;
-      let val;
-      for(let i = 0; i < TOTAL; i++) {
-        (distributeLog.args.holders[i]).should.equal(holders[i]);
-        val = new BigNumber(distributeLog.args.amounts[i]);
-        val.should.be.bignumber.equal(amounts[i]);
+      for(let i = 0; i < 10; i++) {
+        holders = ListAddresses.slice(TOTAL * i, TOTAL * (i+1));
+        await DeputationInstance.distribute(holders, amounts, {from: admin}).should.be.fulfilled;
       }
+    });
+
+    it("Should reject distribute tokens to holders if caller is not admin", async function() {
+      await DeputationInstance.setToken(MaskinTokenInstance.address, {from: deputation}).should.be.fulfilled;
+
+      await DeputationInstance.distribute(holders, amounts, {from: guess}).should.be.rejected;
     });
 
     it("Should reject if Deputation contains null Maskin token address", async function() {
-      await DeputationInstance.distribute(holders, amounts).should.be.rejected;
+      let token = await DeputationInstance.token().should.be.fulfilled;
+      assert.equal(token, 0);
+
+      await DeputationInstance.distribute(holders, amounts, {from: admin}).should.be.rejected;
+    });
+
+    it("Should reject distribute tokens to holders if total of amounts is greater than balance of Deputation", async function() {
+      await DeputationInstance.setToken(MaskinTokenInstance.address, {from: deputation}).should.be.fulfilled;
+
+      let deputationBalance = await MaskinTokenInstance.balanceOf(DeputationInstance.address).should.be.fulfilled;
+      deputationBalance.should.be.bignumber.equal(bn.tokens(2000));
+      for(let i = 0; i < TOTAL; i++) {
+        amounts[i] = THOUSAND_TOKENS;
+      }
+
+      await DeputationInstance.distribute(holders, amounts, {from: admin}).should.be.rejected;
     });
 
     it("Should reject if the number of holders is different from the number of amounts", async function() {
       holders = ListAddresses.slice(0, TOTAL + TOTAL);
       await DeputationInstance.setToken(MaskinTokenInstance.address, {from: deputation}).should.be.fulfilled;
 
-      await DeputationInstance.distribute(holders, amounts).should.be.rejected;
+      await DeputationInstance.distribute(holders, amounts, {from: admin}).should.be.rejected;
+    });
+
+    it("Catch event log", async function() {
+      let val;
+      await DeputationInstance.setToken(MaskinTokenInstance.address, {from: deputation}).should.be.fulfilled;
+
+      const {logs} = await DeputationInstance.distribute(holders, amounts, {from: admin}).should.be.fulfilled;
+      const distributeLog = logs.find(e => e.event === 'FundsDistributed');
+      distributeLog.should.exist;
+      for(let i = 0; i < TOTAL; i++) {
+        (distributeLog.args.holders[i]).should.equal(holders[i]);
+        val = new BigNumber(distributeLog.args.amounts[i]);
+        val.should.be.bignumber.equal(amounts[i]);
+      }
     });
   });
 });
