@@ -114,7 +114,7 @@ contract('Deputation', function(accounts) {
       for(let i = 0; i < TOTAL; i++) {
         (distributeLog.args.holders[i]).should.equal(holders[i]);
         val = new BigNumber(distributeLog.args.amounts[i]);
-        val.should.be.bignumber.equal(HUNDRED_TOKENS);
+        val.should.be.bignumber.equal(amounts[i]);
       }
     });
 
@@ -128,18 +128,5 @@ contract('Deputation', function(accounts) {
 
       await DeputationInstance.distribute(holders, amounts).should.be.rejected;
     });
-
-    // it("Catch event log", async function() {
-    //   await DeputationInstance.setToken(MaskinTokenInstance.address, {from: deputation}).should.be.fulfilled;
-    //
-    //   await DeputationInstance.distribute(holders, amounts).should.be.fulfilled;
-    //   const {logs} = await DeputationInstance.distribute(holders, amounts).should.be.fulfilled;
-    //   const distributeLog = logs.find(e => e.event === 'FundsDistributed');
-    //   distributeLog.should.exist;
-    //   for(let i = 0; i < TOTAL; i++) {
-    //     (distributeLog.args.holders[i]).should.equal(holders[i]);
-    //     (distributeLog.args.amounts[i]).should.be.bignumber.equal(amounts[i]);
-    //   }
-    // });
   });
 });
