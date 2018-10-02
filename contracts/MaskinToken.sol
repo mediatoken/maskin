@@ -1,11 +1,13 @@
 pragma solidity ^0.4.24;
 
 import './access/HasAdmin.sol';
+import './access/HasOperator.sol';
 import './base-token/PausableToken.sol';
 import './delegate/CanDelegateToken.sol';
 import './delegate/DelegateToken.sol';
 import './TraceableToken.sol';
 import './WithdrawalToken.sol';
+import './utils/TransactionPool.sol';
 
 
 /**
@@ -26,7 +28,7 @@ import './WithdrawalToken.sol';
  *  - attempts to reject ether sent and allows any ether held to be transferred out.
  *  - allows the new owner to accept the ownership transfer, the owner can cancel the transfer if needed.
  **/
-contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToken, WithdrawalToken, PausableToken {
+contract MaskinToken is HasAdmin, HasOperator, TransactionPool, CanDelegateToken, DelegateToken, TraceableToken, WithdrawalToken, PausableToken {
   string public name = "MaskinCoin";
   string public symbol = "MAS";
 
@@ -45,6 +47,8 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
   uint8 public systemPaidRate;   // %
   uint8 public writerPaidRate;   // %
   event ChangePaidRates(uint8 systemPaidRate, uint8 writerPaidRate);
+
+  event ConfirmMint(uint256 transactionId);
 
   event Mint(address indexed to, uint256 value);
 
@@ -84,8 +88,7 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
     address _writer,
     uint256 _amount
   )
-    public
-    onlyAdmin
+    internal
   {
     uint256 _forWriter = _amount.mul(writerPaidRate).div(100);
     require(_forWriter > 0);
@@ -102,6 +105,37 @@ contract MaskinToken is HasAdmin, CanDelegateToken, DelegateToken, TraceableToke
     }
 
     emit Mint(_writer, _amount);
+  }
+
+  /**
+   * @dev Allows an operator to submit a transaction.
+   * @param _writer Writer address.
+   * @param _amount Amount of tokens
+   */
+  function submitMint(
+    address _writer,
+    uint256 _amount
+  )
+    public
+    onlyOperator
+  {
+    addTransactionToPool(_writer, _amount);
+  }
+
+  /**
+   * @dev Allows Admin to execute a submitted transaction.
+   * @param transactionId Transaction ID.
+   */
+  function confirmMint(uint256 transactionId)
+    public
+    onlyAdmin
+  {
+    require(isTransactionValid(transactionId));
+    if(pool[transactionId].canExecute == true) {
+      mint(pool[transactionId].writer, pool[transactionId].amount);
+      pool[transactionId].canExecute = false;
+      emit ConfirmMint(transactionId);
+    }
   }
 
   function changePaidRates(
