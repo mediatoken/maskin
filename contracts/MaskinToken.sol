@@ -7,7 +7,7 @@ import './delegate/CanDelegateToken.sol';
 import './delegate/DelegateToken.sol';
 import './TraceableToken.sol';
 import './WithdrawalToken.sol';
-import './utils/TransactionPool.sol';
+import './utils/MintPool.sol';
 
 
 /**
@@ -28,7 +28,7 @@ import './utils/TransactionPool.sol';
  *  - attempts to reject ether sent and allows any ether held to be transferred out.
  *  - allows the new owner to accept the ownership transfer, the owner can cancel the transfer if needed.
  **/
-contract MaskinToken is HasAdmin, HasOperator, TransactionPool, CanDelegateToken, DelegateToken, TraceableToken, WithdrawalToken, PausableToken {
+contract MaskinToken is HasAdmin, HasOperator, MintPool, CanDelegateToken, DelegateToken, TraceableToken, WithdrawalToken, PausableToken {
   string public name = "MaskinCoin";
   string public symbol = "MAS";
 
@@ -48,7 +48,7 @@ contract MaskinToken is HasAdmin, HasOperator, TransactionPool, CanDelegateToken
   uint8 public writerPaidRate;   // %
   event ChangePaidRates(uint8 systemPaidRate, uint8 writerPaidRate);
 
-  event ConfirmMint(uint256 transactionId);
+  event ConfirmMintRequest(uint256 mintRequestID);
 
   event Mint(address indexed to, uint256 value);
 
@@ -84,7 +84,7 @@ contract MaskinToken is HasAdmin, HasOperator, TransactionPool, CanDelegateToken
    * @param _writer Writer address.
    * @param _amount Amount of tokens.
    */
-  function mint(
+  function _mintExecute(
     address _writer,
     uint256 _amount
   )
@@ -108,34 +108,35 @@ contract MaskinToken is HasAdmin, HasOperator, TransactionPool, CanDelegateToken
   }
 
   /**
-   * @dev Allows an operator to submit a transaction.
+   * @dev Allows an operator to submit a mint request whenever a writer posts a new article
    * @param _writer Writer address.
    * @param _amount Amount of tokens
    */
-  function submitMint(
+  function submitMintRequest(
     address _writer,
     uint256 _amount
   )
     public
     onlyOperator
   {
-    addTransactionToPool(_writer, _amount);
+    _addMintRequest(_writer, _amount);
   }
 
   /**
-   * @dev Allows Admin to execute a submitted transaction.
-   * @param transactionId Transaction ID.
+   * @dev Allows Admin to execute a submitted mint request.
+   * @param _mintRequestID mint request ID.
    */
-  function confirmMint(uint256 transactionId)
+  function confirmMintRequest(uint256 _mintRequestID)
     public
     onlyAdmin
   {
-    require(isTransactionValid(transactionId));
-    if(pool[transactionId].canExecute == true) {
-      mint(pool[transactionId].writer, pool[transactionId].amount);
-      pool[transactionId].canExecute = false;
-      emit ConfirmMint(transactionId);
-    }
+    require(_canMintRequest(_mintRequestID));
+    address _writer;
+    uint256 _amount;
+    (_writer, _amount) = _getMintRequest(_mintRequestID);
+    _mintExecute(_writer, _amount);
+    _executedMintRequest(_mintRequestID);
+    emit ConfirmMintRequest(_mintRequestID);
   }
 
   function changePaidRates(
