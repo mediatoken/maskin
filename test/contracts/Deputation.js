@@ -5,9 +5,9 @@ const web3ABI = require('web3-eth-abi');
 
 const BigNumber = web3.BigNumber;
 const should = require('chai')
-  .use(require('chai-as-promised'))
-  .use(require('chai-bignumber')(BigNumber))
-  .should();
+.use(require('chai-as-promised'))
+.use(require('chai-bignumber')(BigNumber))
+.should();
 
 const bn = require('./helpers/bignumber.js');
 
@@ -15,16 +15,18 @@ const MaskinToken   = artifacts.require("./MaskinToken.sol");
 const Deputation    = artifacts.require("./Deputation.sol");
 const BalanceSheet  = artifacts.require("./BalanceSheet.sol");
 const HasAdmin      = artifacts.require("./HasAdmin.sol");
+const HasOperator   = artifacts.require("./HasOperator.sol");
 
 
 contract('Deputation', function(accounts) {
   const ownerToken              = accounts[0];
   const ownerBalanceSheet       = accounts[1];
   const admin                   = accounts[2];
-  const writer                  = accounts[3];
-  const system_wallet           = accounts[4];
-  const deputation              = accounts[5];
-  const guess                   = accounts[6];
+  const operator                = accounts[3];
+  const writer                  = accounts[4];
+  const system_wallet           = accounts[5];
+  const deputation              = accounts[6];
+  const guess                   = accounts[7];
 
   const TEN_THOUSAND_TOKENS     = bn.tokens(10000);
   const THOUSAND_TOKENS         = bn.tokens(1000);
@@ -63,13 +65,37 @@ contract('Deputation', function(accounts) {
       "type": "function"
     };
 
+    const abiAddOperatorFunction = {
+      "constant": false,
+      "inputs": [
+        {
+          "name": "_operator",
+          "type": "address"
+        }
+      ],
+      "name": "addOperator",
+      "outputs": [],
+      "payable": false,
+      "stateMutability": "nonpayable",
+      "type": "function"
+    };
+
     let addAdminFunc = web3ABI.encodeFunctionCall(
       abiAddAdminFunction,
       [admin]
     );
 
+    let addOperatorFunc = web3ABI.encodeFunctionCall(
+      abiAddOperatorFunction,
+      [operator]
+    );
+
     await web3.eth.sendTransaction({from: ownerToken, to: MaskinTokenInstance.address, value: 0, data: addAdminFunc, gas: 3000000});
     await web3.eth.sendTransaction({from: deputation, to: DeputationInstance.address, value: 0, data: addAdminFunc, gas: 3000000});
+
+    web3 = HasOperator.web3;
+    await web3.eth.sendTransaction({from: ownerToken, to: MaskinTokenInstance.address, value: 0, data: addOperatorFunc, gas: 3000000});
+    (await MaskinTokenInstance.isOperator(operator)).should.equal(true);
   });
 
   describe("setToken()", function() {
@@ -89,8 +115,8 @@ contract('Deputation', function(accounts) {
     });
 
     it("Catch event log", async function() {
-      const {logs} = await DeputationInstance.setToken(MaskinTokenInstance.address, {from: deputation}).should.be.fulfilled;
-      const setTokenLog = logs.find(e => e.event === 'SetToken');
+      let {logs} = await DeputationInstance.setToken(MaskinTokenInstance.address, {from: deputation}).should.be.fulfilled;
+      let setTokenLog = logs.find(e => e.event === 'SetToken');
       setTokenLog.should.exist;
       (setTokenLog.args.maskinToken).should.equal(MaskinTokenInstance.address);
     });
@@ -106,7 +132,13 @@ contract('Deputation', function(accounts) {
         ListAddresses.push(line);
       });
 
-      await MaskinTokenInstance.mint(writer, TEN_THOUSAND_TOKENS, {from: admin}).should.be.fulfilled;
+      let {logs} = await MaskinTokenInstance.submitMintRequest(writer, TEN_THOUSAND_TOKENS, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+      (submitMintLog.args.sender).should.equal(writer);
+      (submitMintLog.args.amount).should.be.bignumber.equal(TEN_THOUSAND_TOKENS);
+
+      await MaskinTokenInstance.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
 
       holders = ListAddresses.slice(0, TOTAL);
       for(let i = 0; i < TOTAL; i++) {
@@ -182,14 +214,141 @@ contract('Deputation', function(accounts) {
       let val;
       await DeputationInstance.setToken(MaskinTokenInstance.address, {from: deputation}).should.be.fulfilled;
 
-      const {logs} = await DeputationInstance.distribute(holders, amounts, {from: admin}).should.be.fulfilled;
-      const distributeLog = logs.find(e => e.event === 'FundsDistributed');
+      let {logs} = await DeputationInstance.distribute(holders, amounts, {from: admin}).should.be.fulfilled;
+      let distributeLog = logs.find(e => e.event === 'FundsDistributed');
       distributeLog.should.exist;
       for(let i = 0; i < TOTAL; i++) {
         (distributeLog.args.holders[i]).should.equal(holders[i]);
         val = new BigNumber(distributeLog.args.amounts[i]);
         val.should.be.bignumber.equal(amounts[i]);
       }
+    });
+  });
+
+  describe("reclaimToken()", function() {
+    beforeEach(async function () {
+      let {logs} = await MaskinTokenInstance.submitMintRequest(writer, TEN_THOUSAND_TOKENS, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+      (submitMintLog.args.sender).should.equal(writer);
+      (submitMintLog.args.amount).should.be.bignumber.equal(TEN_THOUSAND_TOKENS);
+
+      await MaskinTokenInstance.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+    });
+
+    it("Should allow reclaim token if caller is owner", async function() {
+      let abiReclaimTokenFunction = {
+        "constant": false,
+        "inputs": [
+          {
+            "name": "token",
+            "type": "address"
+          },
+          {
+            "name": "_to",
+            "type": "address"
+          }
+        ],
+        "name": "reclaimToken",
+        "outputs": [],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "function"
+      };
+
+      let reclaimTokenFunc = web3ABI.encodeFunctionCall(
+        abiReclaimTokenFunction,
+        [MaskinTokenInstance.address, guess]
+      );
+
+      web3 = Deputation.web3;
+      await web3.eth.sendTransaction({
+        from: deputation,
+        to: DeputationInstance.address,
+        value: 0,
+        data: reclaimTokenFunc,
+        gas: 3000000}, function(error, result) {
+          assert.isNull(error);
+      });
+    });
+
+    it("Should allow reclaim token which is equal to amount of current balance of this Deputation contract", async function() {
+      let previousDeputationBalance = await MaskinTokenInstance.balanceOf(DeputationInstance.address).should.be.fulfilled;
+
+      let abiReclaimTokenFunction = {
+        "constant": false,
+        "inputs": [
+          {
+            "name": "token",
+            "type": "address"
+          },
+          {
+            "name": "_to",
+            "type": "address"
+          }
+        ],
+        "name": "reclaimToken",
+        "outputs": [],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "function"
+      };
+
+      let reclaimTokenFunc = web3ABI.encodeFunctionCall(
+        abiReclaimTokenFunction,
+        [MaskinTokenInstance.address, guess]
+      );
+
+      web3 = Deputation.web3;
+      await web3.eth.sendTransaction({
+        from: deputation,
+        to: DeputationInstance.address,
+        value: 0,
+        data: reclaimTokenFunc,
+        gas: 3000000}, function(error, result) {
+          assert.isNull(error);
+      });
+
+      let afterDeputationBalance = await MaskinTokenInstance.balanceOf(DeputationInstance.address).should.be.fulfilled;
+
+      let guessBalance = await MaskinTokenInstance.balanceOf(guess).should.be.fulfilled;
+      previousDeputationBalance.minus(afterDeputationBalance).should.be.bignumber.equal(guessBalance);
+    });
+
+    it("Should reject reclaim token if caller is not owner", async function() {
+      let abiReclaimTokenFunction = {
+        "constant": false,
+        "inputs": [
+          {
+            "name": "token",
+            "type": "address"
+          },
+          {
+            "name": "_to",
+            "type": "address"
+          }
+        ],
+        "name": "reclaimToken",
+        "outputs": [],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "function"
+      };
+
+      let reclaimTokenFunc = web3ABI.encodeFunctionCall(
+        abiReclaimTokenFunction,
+        [MaskinTokenInstance.address, guess]
+      );
+
+      web3 = Deputation.web3;
+      await web3.eth.sendTransaction({
+        from: operator,
+        to: DeputationInstance.address,
+        value: 0,
+        data: reclaimTokenFunc,
+        gas: 3000000}, function(error, result) {
+          assert.isNotNull(error)
+      });
     });
   });
 });
