@@ -4,11 +4,11 @@ contract MintPool {
   struct MintRequest {
     address writer;
     uint256 amount;
-    bool canExecute;
+    bool isExecuted;
   }
 
-  mapping (uint256 => MintRequest) private pool;
-  uint256 private mintRequestCount;
+  mapping (uint256 => MintRequest) private _pool;
+  uint256 public mintRequestCount;
 
   event MintSubmission(
     uint256 indexed mintRequestID,
@@ -20,6 +20,11 @@ contract MintPool {
     mintRequestCount = 0;
   }
 
+  /**
+   * @dev Add a mint request to pool
+   * @param _writer Writer address
+   * @param _amount Amount of tokens
+   */
   function _addMintRequest(
     address _writer,
     uint256 _amount
@@ -27,41 +32,57 @@ contract MintPool {
     internal
   {
     require((_writer != 0) && (_amount > 0));
+
     uint256 mintRequestID = mintRequestCount;
-    pool[mintRequestID] = MintRequest({
+    _pool[mintRequestID] = MintRequest({
       writer: _writer,
       amount: _amount,
-      canExecute: true
+      isExecuted: false
     });
     mintRequestCount += 1;
+
     emit MintSubmission(mintRequestID, _writer, _amount);
   }
 
-  function _canMintRequest(
-    uint256 mintRequestID
+  /**
+   * @dev Check mint request ID is valid before executing mint function
+   * @param _mintRequestID mint request ID
+   */
+  function _canExecuteMinting(
+    uint256 _mintRequestID
   )
     internal
     view
     returns(bool)
   {
-    return ((mintRequestID < mintRequestCount) && (pool[mintRequestID].canExecute));
+    return ((_mintRequestID < mintRequestCount) && (_pool[_mintRequestID].isExecuted == false));
   }
 
-  function _executedMintRequest(
-    uint256 mintRequestID
+  /**
+   * @dev Specify a mint request ID is already executed
+   * @param _mintRequestID mint request ID
+   */
+  function _mintExecuted(
+    uint256 _mintRequestID
   )
     internal
   {
-    pool[mintRequestID].canExecute = false;
+    _pool[_mintRequestID].isExecuted = true;
   }
 
-  function _getMintRequest(
-    uint256 mintRequestID
+  /**
+   * @dev Allows get information of a mint request ID
+   * @param _mintRequestID mint request ID
+   */
+  function getMintRequest(
+    uint256 _mintRequestID
   )
-    internal
+    public
     view
-    returns(address, uint256)
+    returns(address, uint256, bool)
   {
-    return (pool[mintRequestID].writer, pool[mintRequestID].amount);
+    require(_mintRequestID < mintRequestCount);
+
+    return (_pool[_mintRequestID].writer, _pool[_mintRequestID].amount, _pool[_mintRequestID].isExecuted);
   }
 }

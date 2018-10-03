@@ -48,9 +48,7 @@ contract MaskinToken is HasAdmin, HasOperator, MintPool, CanDelegateToken, Deleg
   uint8 public writerPaidRate;   // %
   event ChangePaidRates(uint8 systemPaidRate, uint8 writerPaidRate);
 
-  event ConfirmMintRequest(uint256 mintRequestID);
-
-  event Mint(address indexed to, uint256 value);
+  event ConfirmMintRequest(uint256 mintRequestID, address indexed addr, uint256 value);
 
   constructor(address _wallet, address _deputation) public {
     wallet          = _wallet;
@@ -64,7 +62,7 @@ contract MaskinToken is HasAdmin, HasOperator, MintPool, CanDelegateToken, Deleg
   }
 
   /**
-   * @dev Throws if calling preMint is not in the first time.
+   * @dev Throws if calling preMint is not in the first time
    */
   modifier onlyOnInit() {
     require(initialMint == false);
@@ -72,7 +70,7 @@ contract MaskinToken is HasAdmin, HasOperator, MintPool, CanDelegateToken, Deleg
   }
 
   /**
-   * @dev Mints a initial amount of tokens for owner
+   * @dev Mints an initial amount of tokens for owner
    */
   function preMint() public onlyOwner onlyOnInit {
     _mint(msg.sender, INITIAL_SUPPLY);
@@ -81,10 +79,10 @@ contract MaskinToken is HasAdmin, HasOperator, MintPool, CanDelegateToken, Deleg
 
   /**
    * @dev Mints a specified amount of tokens.
-   * @param _writer Writer address.
+   * @param _writer Writer address
    * @param _amount Amount of tokens.
    */
-  function _mintExecute(
+  function _executeMint(
     address _writer,
     uint256 _amount
   )
@@ -103,13 +101,11 @@ contract MaskinToken is HasAdmin, HasOperator, MintPool, CanDelegateToken, Deleg
     if (_forSystem > 0) {
       _mint(wallet, _forSystem);
     }
-
-    emit Mint(_writer, _amount);
   }
 
   /**
    * @dev Allows an operator to submit a mint request whenever a writer posts a new article
-   * @param _writer Writer address.
+   * @param _writer Writer address
    * @param _amount Amount of tokens
    */
   function submitMintRequest(
@@ -123,20 +119,23 @@ contract MaskinToken is HasAdmin, HasOperator, MintPool, CanDelegateToken, Deleg
   }
 
   /**
-   * @dev Allows Admin to execute a submitted mint request.
-   * @param _mintRequestID mint request ID.
+   * @dev Allows Admin to execute a submitted mint request
+   * @param _mintRequestID mint request ID
    */
   function confirmMintRequest(uint256 _mintRequestID)
     public
     onlyAdmin
   {
-    require(_canMintRequest(_mintRequestID));
+    require(_canExecuteMinting(_mintRequestID));
+
     address _writer;
     uint256 _amount;
-    (_writer, _amount) = _getMintRequest(_mintRequestID);
-    _mintExecute(_writer, _amount);
-    _executedMintRequest(_mintRequestID);
-    emit ConfirmMintRequest(_mintRequestID);
+    bool _isExecuted;
+    (_writer, _amount, _isExecuted) = getMintRequest(_mintRequestID);
+    _executeMint(_writer, _amount);
+    _mintExecuted(_mintRequestID);
+
+    emit ConfirmMintRequest(_mintRequestID, _writer, _amount);
   }
 
   function changePaidRates(
