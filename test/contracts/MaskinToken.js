@@ -12,6 +12,7 @@ const MaskinToken       = artifacts.require("./MaskinToken.sol");
 const Deputation        = artifacts.require("./Deputation.sol");
 const BalanceSheet      = artifacts.require("./BalanceSheet.sol");
 const HasAdmin          = artifacts.require("./HasAdmin.sol");
+const HasOperator       = artifacts.require("./HasOperator.sol");
 const WithdrawalToken   = require("./WithdrawalToken.js");
 const TraceableToken    = require("./TraceableToken.js");
 const DelegateToken     = require("./delegate/DelegateToken.js");
@@ -25,10 +26,11 @@ contract('MaskinToken', function (accounts) {
   const ownerToken              = accounts[0];
   const ownerBalanceSheet       = accounts[1];
   const admin                   = accounts[2];
-  const writer                  = accounts[3];
-  const system_wallet           = accounts[4];
-  const deputation              = accounts[5];
-  const guess                   = accounts[6];
+  const operator                = accounts[3];
+  const writer                  = accounts[4];
+  const system_wallet           = accounts[5];
+  const deputation              = accounts[6];
+  const guess                   = accounts[7];
 
   const TEN_THOUSAND_TOKENS     = bn.tokens(10000);
 
@@ -59,12 +61,36 @@ contract('MaskinToken', function (accounts) {
       "type": "function"
     };
 
+    const abiAddOperatorFunction = {
+      "constant": false,
+      "inputs": [
+        {
+          "name": "_operator",
+          "type": "address"
+        }
+      ],
+      "name": "addOperator",
+      "outputs": [],
+      "payable": false,
+      "stateMutability": "nonpayable",
+      "type": "function"
+    };
+
     let addAdminFunc = web3ABI.encodeFunctionCall(
       abiAddAdminFunction,
       [admin]
     );
 
+    let addOperatorFunc = web3ABI.encodeFunctionCall(
+      abiAddOperatorFunction,
+      [operator]
+    );
+
     await web3.eth.sendTransaction({from: ownerToken, to: MaskinTokenInstance.address, value: 0, data: addAdminFunc, gas: 3000000});
+
+    web3 = HasOperator.web3;
+    await web3.eth.sendTransaction({from: ownerToken, to: MaskinTokenInstance.address, value: 0, data: addOperatorFunc, gas: 3000000});
+    (await MaskinTokenInstance.isOperator(operator)).should.equal(true);
   });
 
   describe("preMint()", function() {
@@ -91,22 +117,92 @@ contract('MaskinToken', function (accounts) {
     });
   });
 
-  describe("mint()", function() {
-    beforeEach(async function () {
-      await MaskinTokenInstance.preMint({from: ownerToken}).should.be.fulfilled;
+  describe("submitMintRequest()", function() {
+    it("Should allow if caller is operator", async function() {
+      await MaskinTokenInstance.submitMintRequest(writer, TEN_THOUSAND_TOKENS, {from: operator}).should.be.fulfilled;
     });
 
-    it("Should allow mint tokens whenever writer posts new article if caller is admin", async function() {
+    it("Should allow increasing mintRequestCount number by 1 if invoking a submitMintRequest successfully", async function() {
+      let previousMintRequestCount = await MaskinTokenInstance.mintRequestCount();
+      await MaskinTokenInstance.submitMintRequest(writer, TEN_THOUSAND_TOKENS, {from: operator}).should.be.fulfilled;
+      let afterMintRequestCount = await MaskinTokenInstance.mintRequestCount();
+      afterMintRequestCount.minus(1).should.be.bignumber.equal(previousMintRequestCount);
+    });
+
+    it("Should reject if the given address input is address 0", async function() {
+      await MaskinTokenInstance.submitMintRequest(0, TEN_THOUSAND_TOKENS, {from: guess}).should.be.rejected;
+    });
+
+    it("Should reject if the given amount input is 0", async function() {
+      await MaskinTokenInstance.submitMintRequest(writer, 0, {from: guess}).should.be.rejected;
+    });
+
+    it("Should reject if caller is not operator", async function() {
+      await MaskinTokenInstance.submitMintRequest(writer, TEN_THOUSAND_TOKENS, {from: guess}).should.be.rejected;
+    });
+
+    it("Catch event log", async function() {
+      let {logs} = await MaskinTokenInstance.submitMintRequest(writer, TEN_THOUSAND_TOKENS, {from: operator}).should.be.fulfilled;
+      let submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+      (submitMintLog.args.mintRequestID).should.be.bignumber.equal(0);
+      (submitMintLog.args.sender).should.equal(writer);
+      (submitMintLog.args.amount).should.be.bignumber.equal(TEN_THOUSAND_TOKENS);
+    });
+  });
+
+  describe("getMintRequest()", function() {
+    var submitMintLog;
+    beforeEach(async function () {
+      let {logs} = await MaskinTokenInstance.submitMintRequest(writer, TEN_THOUSAND_TOKENS, {from: operator}).should.be.fulfilled;
+      submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+      (submitMintLog.args.sender).should.equal(writer);
+      (submitMintLog.args.amount).should.be.bignumber.equal(TEN_THOUSAND_TOKENS);
+    });
+
+    it("Should allow if the given mint request ID is valid", async function() {
+      let mintRequest = await MaskinTokenInstance.getMintRequest(submitMintLog.args.mintRequestID).should.be.fulfilled;
+      (mintRequest[0]).should.equal(writer);
+      (mintRequest[1]).should.be.bignumber.equal(TEN_THOUSAND_TOKENS);
+      assert.isFalse(mintRequest[2]);
+    });
+
+    it("Should reject if the given mint request ID is invalid", async function() {
+      await MaskinTokenInstance.getMintRequest(submitMintLog.args.mintRequestID + 1).should.be.rejected;
+    });
+  });
+
+  describe("confirmMintRequest()", function() {
+    var submitMintLog;
+    beforeEach(async function () {
+      let {logs} = await MaskinTokenInstance.submitMintRequest(writer, TEN_THOUSAND_TOKENS, {from: operator}).should.be.fulfilled;
+      submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+      (submitMintLog.args.sender).should.equal(writer);
+      (submitMintLog.args.amount).should.be.bignumber.equal(TEN_THOUSAND_TOKENS);
+    });
+
+    it("Should allow if caller is admin", async function() {
+      await MaskinTokenInstance.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+    });
+
+    it("Should allow changing isExecuted value of the given mint request ID to True after being confirmed", async function() {
+      let previousMintRequest = await MaskinTokenInstance.getMintRequest(submitMintLog.args.mintRequestID).should.be.fulfilled;
+      assert.isFalse(previousMintRequest[2]);
+
+      await MaskinTokenInstance.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+
+      let afterMintRequest = await MaskinTokenInstance.getMintRequest(submitMintLog.args.mintRequestID).should.be.fulfilled;
+      assert.isTrue(afterMintRequest[2]);
+    });
+
+    it("Should allow mint successfully after invoking a confirmMintRequest", async function() {
       let previousWriterBalance = await MaskinTokenInstance.balanceOf(writer).should.be.fulfilled;
       let previousAllHoldersBalance = await MaskinTokenInstance.balanceOf(DeputationInstance.address).should.be.fulfilled;
       let previousSystemWalletBalance = await MaskinTokenInstance.balanceOf(system_wallet).should.be.fulfilled;
 
-      assert.equal(previousWriterBalance, 0);
-      assert.equal(previousAllHoldersBalance, 0);
-      assert.equal(previousSystemWalletBalance, 0);
-
-      await DeputationInstance.setToken(MaskinTokenInstance.address, {from: deputation}).should.be.fulfilled;
-      await MaskinTokenInstance.mint(writer, TEN_THOUSAND_TOKENS, {from: admin}).should.be.fulfilled;
+      await MaskinTokenInstance.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
 
       let afterWriterBalance = await MaskinTokenInstance.balanceOf(writer).should.be.fulfilled;
       let afterAllHoldersBalance = await MaskinTokenInstance.balanceOf(DeputationInstance.address).should.be.fulfilled;
@@ -117,16 +213,27 @@ contract('MaskinToken', function (accounts) {
       afterSystemWalletBalance.minus(bn.tokens(1000)).should.be.bignumber.equal(previousSystemWalletBalance);
     });
 
-    it("Should reject mint if caller is not admin ", async function() {
-      MaskinTokenInstance.mint(writer, TEN_THOUSAND_TOKENS, {from: guess}).should.be.rejected;
+    it("Should reject if caller is not admin", async function() {
+      await MaskinTokenInstance.confirmMintRequest(submitMintLog.args.mintRequestID, {from: guess}).should.be.rejected;
+    });
+
+    it("Should reject if the given mint request ID is invalid", async function() {
+      let currentMintRequestCount = await MaskinTokenInstance.mintRequestCount();
+      await MaskinTokenInstance.confirmMintRequest(currentMintRequestCount + 1, {from: admin}).should.be.rejected;
+    });
+
+    it("Should reject if the given mint request ID is already confirmed", async function() {
+      await MaskinTokenInstance.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+      await MaskinTokenInstance.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.rejected;
     });
 
     it("Catch event log", async function() {
-      const {logs} = await MaskinTokenInstance.mint(writer, TEN_THOUSAND_TOKENS, {from: admin}).should.be.fulfilled;
-      const mintLog = logs.find(e => e.event === 'Mint');
-      mintLog.should.exist;
-      (mintLog.args.to).should.equal(writer);
-      (mintLog.args.value).should.be.bignumber.equal(TEN_THOUSAND_TOKENS);
+      let {logs} = await MaskinTokenInstance.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+      let confirmMintRequestLog = logs.find(e => e.event === 'ConfirmMintRequest');
+      confirmMintRequestLog.should.exist;
+      (confirmMintRequestLog.args.mintRequestID).should.be.bignumber.equal(0);
+      (confirmMintRequestLog.args.addr).should.equal(writer);
+      (confirmMintRequestLog.args.value).should.be.bignumber.equal(TEN_THOUSAND_TOKENS);
     });
   });
 
@@ -141,16 +248,22 @@ contract('MaskinToken', function (accounts) {
       assert.equal(holdersPaidRate, 20);
       assert.equal(systemPaidRate, 20);
       assert.equal(writerPaidRate, 60);
+    });
+
+    it("Should allow increasing balance of participants if changing paid rate successfully", async function() {
+      await MaskinTokenInstance.changePaidRates(20, 60, {from: admin}).should.be.fulfilled;
 
       let previousWriterBalance = await MaskinTokenInstance.balanceOf(writer).should.be.fulfilled;
       let previousAllHoldersBalance = await MaskinTokenInstance.balanceOf(DeputationInstance.address).should.be.fulfilled;
       let previousSystemWalletBalance = await MaskinTokenInstance.balanceOf(system_wallet).should.be.fulfilled;
 
-      assert.equal(previousWriterBalance, 0);
-      assert.equal(previousAllHoldersBalance, 0);
-      assert.equal(previousSystemWalletBalance, 0);
+      let {logs} = await MaskinTokenInstance.submitMintRequest(writer, TEN_THOUSAND_TOKENS, {from: operator}).should.be.fulfilled;
+      let submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+      (submitMintLog.args.sender).should.equal(writer);
+      (submitMintLog.args.amount).should.be.bignumber.equal(TEN_THOUSAND_TOKENS);
 
-      await MaskinTokenInstance.mint(writer, TEN_THOUSAND_TOKENS, {from: admin}).should.be.fulfilled;
+      await MaskinTokenInstance.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
 
       let afterWriterBalance = await MaskinTokenInstance.balanceOf(writer).should.be.fulfilled;
       let afterAllHoldersBalance = await MaskinTokenInstance.balanceOf(DeputationInstance.address).should.be.fulfilled;

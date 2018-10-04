@@ -1,8 +1,9 @@
 const BigNumber = web3.BigNumber;
 const web3ABI = require('web3-eth-abi');
 
-const BalanceSheet = artifacts.require("./BalanceSheet.sol");
-const HasAdmin = artifacts.require("./HasAdmin.sol");
+const BalanceSheet  = artifacts.require("./BalanceSheet.sol");
+const HasAdmin      = artifacts.require("./HasAdmin.sol");
+const HasOperator   = artifacts.require("./HasOperator.sol");
 
 const should = require('chai')
   .use(require('chai-as-promised'))
@@ -13,17 +14,18 @@ const bn = require('../helpers/bignumber.js');
 
 
 function check(accounts, deployTokenCb) {
-  var token;
-  var balanceSheet;
-  var owner = accounts[0];
-  var admin = accounts[1];
-  var writer = accounts[2];
-  var purchaser = accounts[3];
-  var beneficiary = accounts[4];
+  const owner       = accounts[0];
+  const admin       = accounts[1];
+  const operator    = accounts[2];
+  const writer      = accounts[3];
+  const purchaser   = accounts[4];
+  const beneficiary = accounts[5];
 
   const amount_100Tokens = bn.tokens(100);
   const amount_70Tokens = bn.tokens(70);
   const amount_10Tokens = bn.tokens(10);
+
+  var token, balanceSheet;
 
   beforeEach(async function () {
     token = await deployTokenCb();
@@ -48,23 +50,51 @@ function check(accounts, deployTokenCb) {
       "stateMutability": "nonpayable",
       "type": "function"
     };
+    const abiAddOperatorFunction = {
+      "constant": false,
+      "inputs": [
+        {
+          "name": "_operator",
+          "type": "address"
+        }
+      ],
+      "name": "addOperator",
+      "outputs": [],
+      "payable": false,
+      "stateMutability": "nonpayable",
+      "type": "function"
+    };
 
     let addAdminFunc = web3ABI.encodeFunctionCall(
       abiAddAdminFunction,
       [admin]
     );
 
+    let addOperatorFunc = web3ABI.encodeFunctionCall(
+      abiAddOperatorFunction,
+      [operator]
+    );
+
     await web3.eth.sendTransaction({from: owner, to: token.address, value: 0, data: addAdminFunc, gas: 3000000});
+
+    web3 = HasOperator.web3;
+    await web3.eth.sendTransaction({from: owner, to: token.address, value: 0, data: addOperatorFunc, gas: 3000000});
   });
 
   describe('when not paused', function() {
+    beforeEach(async function() {
+      let {logs} = await token.submitMintRequest(purchaser, amount_100Tokens, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+    });
+
     it('should allow approval', async function() {
-      await token.mint(purchaser, amount_100Tokens, {from: admin}).should.be.fulfilled;
       await token.approve(writer, amount_10Tokens, {from: purchaser}).should.be.fulfilled;
     });
 
     it('should allow transfer()', async function() {
-      await token.mint(purchaser, amount_100Tokens, {from: admin}).should.be.fulfilled;
       await token.transfer(beneficiary, amount_10Tokens, {from: purchaser}).should.be.fulfilled;
     });
 
@@ -77,13 +107,17 @@ function check(accounts, deployTokenCb) {
     });
 
     it('should allow transferFrom()', async function() {
-      await token.mint(purchaser, amount_100Tokens, {from: admin}).should.be.fulfilled;
       await token.approve(writer, amount_10Tokens, {from: purchaser}).should.be.fulfilled;
       await token.transferFrom(purchaser, writer, amount_10Tokens, {from: writer}).should.be.fulfilled;
     });
 
     it('should allow burn()', async function() {
-      await token.mint(writer, amount_100Tokens, {from: admin}).should.be.fulfilled;
+      let {logs} = await token.submitMintRequest(writer, amount_100Tokens, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+
       await token.burn(bn.tokens(8), "burn without pause", {from : writer}).should.be.fulfilled;
     });
   });
@@ -103,11 +137,20 @@ function check(accounts, deployTokenCb) {
     });
 
     it('should allow minting', async function() {
-      await token.mint(writer, amount_100Tokens, {from: admin}).should.be.fulfilled;
+      let {logs} = await token.submitMintRequest(writer, amount_100Tokens, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
     });
 
     it('should reject transfer()', async function() {
-      await token.mint(writer, amount_100Tokens, {from: admin}).should.be.fulfilled;
+      let {logs} = await token.submitMintRequest(writer, amount_100Tokens, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+
       await token.transfer(purchaser, amount_100Tokens, {from: writer}).should.be.rejected;
     });
 
@@ -124,7 +167,12 @@ function check(accounts, deployTokenCb) {
     });
 
     it('should reject transferFrom()', async function() {
-      await token.mint(purchaser, amount_100Tokens, {from: admin}).should.be.fulfilled;
+      let {logs} = await token.submitMintRequest(purchaser, amount_100Tokens, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+
       await token.unpause();
       await token.approve(writer, amount_10Tokens, {from: purchaser}).should.be.fulfilled;
       await token.pause();
@@ -132,7 +180,12 @@ function check(accounts, deployTokenCb) {
     });
 
     it('should reject burn()', async function() {
-      await token.mint(writer, amount_100Tokens, {from: admin}).should.be.fulfilled;
+      let {logs} = await token.submitMintRequest(writer, amount_100Tokens, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+
       await token.burn(amount_10Tokens, "burn when pause", {from : writer}).should.be.rejected;
     });
   });
@@ -142,7 +195,11 @@ function check(accounts, deployTokenCb) {
       await token.pause().should.be.fulfilled;
       await token.unpause().should.be.fulfilled;
 
-      await token.mint(purchaser, amount_100Tokens, {from: admin}).should.be.fulfilled;
+      let {logs} = await token.submitMintRequest(purchaser, amount_100Tokens, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
     });
 
     it('paused() should return false', async function() {

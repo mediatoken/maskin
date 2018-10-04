@@ -1,8 +1,9 @@
 const BigNumber = web3.BigNumber;
 const web3ABI = require('web3-eth-abi');
 
-const HasAdmin = artifacts.require("./HasAdmin.sol");
-const BalanceSheet = artifacts.require("./BalanceSheet.sol");
+const HasAdmin      = artifacts.require("./HasAdmin.sol");
+const HasOperator   = artifacts.require("./HasOperator.sol");
+const BalanceSheet  = artifacts.require("./BalanceSheet.sol");
 const bn = require('./helpers/bignumber.js');
 
 const should = require('chai')
@@ -12,15 +13,16 @@ const should = require('chai')
 
 
 function check(accounts, deployTokenCb) {
-  var token;
-  var balanceSheet;
+  const owner       = accounts[0];
+  const admin       = accounts[1];
+  const operator    = accounts[2];
+  const investor    = accounts[3];
+  const purchaser   = accounts[4];
 
-  const owner = accounts[0];
-  const admin = accounts[1];
-  const investor = accounts[2];
-  const purchaser = accounts[3];
   const ZeroAddress = '0x0';
-  const amount = bn.tokens(10);
+  const amount      = bn.tokens(10);
+
+  var token, balanceSheet;
 
   beforeEach(async function () {
     token = await deployTokenCb();
@@ -45,15 +47,41 @@ function check(accounts, deployTokenCb) {
       "stateMutability": "nonpayable",
       "type": "function"
     };
+    const abiAddOperatorFunction = {
+      "constant": false,
+      "inputs": [
+        {
+          "name": "_operator",
+          "type": "address"
+        }
+      ],
+      "name": "addOperator",
+      "outputs": [],
+      "payable": false,
+      "stateMutability": "nonpayable",
+      "type": "function"
+    };
 
     let addAdminFunc = web3ABI.encodeFunctionCall(
       abiAddAdminFunction,
       [admin]
     );
 
+    let addOperatorFunc = web3ABI.encodeFunctionCall(
+      abiAddOperatorFunction,
+      [operator]
+    );
+
     await web3.eth.sendTransaction({from: owner, to: token.address, value: 0, data: addAdminFunc, gas: 3000000});
 
-    await token.mint(investor, amount, {from : admin}).should.be.fulfilled;
+    web3 = HasOperator.web3;
+    await web3.eth.sendTransaction({from: owner, to: token.address, value: 0, data: addOperatorFunc, gas: 3000000});
+
+    let {logs} = await token.submitMintRequest(investor, amount, {from: operator}).should.be.fulfilled;
+    const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+    submitMintLog.should.exist;
+
+    await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
   });
 
   describe('transfer()', function() {

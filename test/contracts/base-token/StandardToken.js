@@ -1,7 +1,9 @@
-const web3ABI = require('web3-eth-abi');
-const BigNumber = web3.BigNumber;
-const BalanceSheet = artifacts.require("./BalanceSheet.sol");
-const HasAdmin = artifacts.require("./HasAdmin.sol");
+const BalanceSheet    = artifacts.require("./BalanceSheet.sol");
+const HasAdmin        = artifacts.require("./HasAdmin.sol");
+const HasOperator     = artifacts.require("./HasOperator.sol");
+
+const web3ABI         = require('web3-eth-abi');
+const BigNumber       = web3.BigNumber;
 
 const should = require('chai')
   .use(require('chai-as-promised'))
@@ -12,16 +14,19 @@ const bn = require('../helpers/bignumber.js');
 
 
 function check(accounts, deployTokenCb) {
-  var token;
-  var balanceSheet;
-  var owner = accounts[0];
-  var admin = accounts[1];
-  var writer = accounts[2];
-  var purchaser = accounts[3];
+  const owner       = accounts[0];
+  const admin       = accounts[1];
+  const operator    = accounts[2];
+  const writer      = accounts[3];
+  const purchaser   = accounts[4];
+
+  const TEN_THOUSAND_TOKENS = bn.tokens(10000);
+
+  var token, balanceSheet;
 
   beforeEach(async function () {
     token = await deployTokenCb();
-    balanceSheet = await BalanceSheet.new({from:owner });
+    balanceSheet = await BalanceSheet.new({from:owner});
 
     await balanceSheet.transferOwnership(token.address).should.be.fulfilled;
     await token.setBalanceSheet(balanceSheet.address).should.be.fulfilled;
@@ -43,12 +48,35 @@ function check(accounts, deployTokenCb) {
       "type": "function"
     };
 
+    const abiAddOperatorFunction = {
+      "constant": false,
+      "inputs": [
+        {
+          "name": "_operator",
+          "type": "address"
+        }
+      ],
+      "name": "addOperator",
+      "outputs": [],
+      "payable": false,
+      "stateMutability": "nonpayable",
+      "type": "function"
+    };
+
     let addAdminFunc = web3ABI.encodeFunctionCall(
       abiAddAdminFunction,
       [admin]
     );
 
+    let addOperatorFunc = web3ABI.encodeFunctionCall(
+      abiAddOperatorFunction,
+      [operator]
+    );
+
     await web3.eth.sendTransaction({from: owner, to: token.address, value: 0, data: addAdminFunc, gas: 3000000});
+
+    web3 = HasOperator.web3;
+    await web3.eth.sendTransaction({from: owner, to: token.address, value: 0, data: addOperatorFunc, gas: 3000000});
   });
 
   describe('totalSupply()', function() {
@@ -168,11 +196,18 @@ function check(accounts, deployTokenCb) {
   });
 
   describe('transferFrom()', function() {
+    beforeEach(async function() {
+      let {logs} = await token.submitMintRequest(writer, TEN_THOUSAND_TOKENS, {from: operator}).should.be.fulfilled;
+      let submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+    });
+
     it('should allow to transfer tokens', async function() {
       let amounts_100 = bn.tokens(100);
       let amounts_10 = bn.tokens(10);
 
-      await token.mint(writer, amounts_100, {from: admin}).should.be.fulfilled;
       await token.approve(purchaser, amounts_10, {from: writer}).should.be.fulfilled;
       await token.transferFrom(writer, purchaser, amounts_10, {from: purchaser}).should.be.fulfilled;
     });
@@ -181,7 +216,6 @@ function check(accounts, deployTokenCb) {
       let amounts_100 = bn.tokens(100);
       let amounts_10 = bn.tokens(10);
 
-      await token.mint(writer, amounts_100, {from: admin}).should.be.fulfilled;
       await token.approve(purchaser, amounts_10, {from: writer}).should.be.fulfilled;
       var balance1Before = await token.balanceOf(writer);
       var balance2Before = await token.balanceOf(purchaser);
@@ -197,7 +231,6 @@ function check(accounts, deployTokenCb) {
       let amounts_100 = bn.tokens(100);
       let amounts_10 = bn.tokens(10);
 
-      await token.mint(writer, amounts_100, {from: admin}).should.be.fulfilled;
       await token.approve(purchaser, amounts_10, {from: writer}).should.be.fulfilled;
       const {logs} = await token.transferFrom(writer, purchaser, amounts_10, {from: purchaser}).should.be.fulfilled;
       const xferEvent = logs.find(e => e.event === 'Transfer');
@@ -211,7 +244,6 @@ function check(accounts, deployTokenCb) {
       let amounts_100 = bn.tokens(100);
       let amounts_10 = bn.tokens(10);
 
-      await token.mint(writer, amounts_100, {from: admin}).should.be.fulfilled;
       await token.approve(purchaser, amounts_10, {from: writer}).should.be.fulfilled;
       await token.transferFrom(writer, 0x0, amounts_10, {from: purchaser}).should.be.rejected;
     });
@@ -220,7 +252,6 @@ function check(accounts, deployTokenCb) {
       let amounts_100 = bn.tokens(100);
       let amounts_10 = bn.tokens(10);
 
-      await token.mint(writer, amounts_100, {from: admin}).should.be.fulfilled;
       await token.approve(purchaser, amounts_10, {from: writer}).should.be.fulfilled;
       await token.transferFrom(writer, purchaser, amounts_10.plus(bn.tokens(1)), {from: purchaser}).should.be.rejected;
     });
@@ -228,7 +259,6 @@ function check(accounts, deployTokenCb) {
     it('should reject transferring an amount of max uint256', async function() {
       var totalTokens = await token.INITIAL_SUPPLY();
 
-      await token.mint(writer, totalTokens, {from: admin}).should.be.fulfilled;
       await token.approve(purchaser, bn.MAX_UINT, {from: writer}).should.be.fulfilled;
       await token.transferFrom(writer, purchaser, bn.MAX_UINT, {from: purchaser}).should.be.rejected;
     });
@@ -236,7 +266,6 @@ function check(accounts, deployTokenCb) {
     it('transferring an amount which exceeds max uint256 should be equivalent 0 tokens', async function() {
       var totalTokens = await token.INITIAL_SUPPLY();
 
-      await token.mint(writer, totalTokens, {from: admin}).should.be.fulfilled;
       await token.approve(purchaser, bn.OVER_UINT, {from: writer}).should.be.fulfilled;
       (await token.allowance(writer, purchaser)).should.be.bignumber.equal(0);
 
@@ -252,11 +281,18 @@ function check(accounts, deployTokenCb) {
   });
 
   describe('transfer()', function() {
+    beforeEach(async function() {
+      let {logs} = await token.submitMintRequest(writer, TEN_THOUSAND_TOKENS, {from: operator}).should.be.fulfilled;
+      let submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+    });
+
     it('should allow to transfer tokens', async function() {
       let amounts_100 = bn.tokens(100);
       let amounts_10 = bn.tokens(10);
 
-      await token.mint(writer, amounts_100, {from: admin}).should.be.fulfilled;
       await token.transfer(purchaser, amounts_10, {from: writer}).should.be.fulfilled;
     });
 
@@ -264,7 +300,6 @@ function check(accounts, deployTokenCb) {
       let amounts_100 = bn.tokens(100);
       let amounts_10 = bn.tokens(10);
 
-      await token.mint(writer, amounts_100, {from: admin}).should.be.fulfilled;
       var balance1Before = await token.balanceOf(writer);
       var balance2Before = await token.balanceOf(purchaser);
 
@@ -280,7 +315,6 @@ function check(accounts, deployTokenCb) {
       let amounts_100 = bn.tokens(100);
       let amounts_10 = bn.tokens(10);
 
-      await token.mint(writer, amounts_100, {from: admin}).should.be.fulfilled;
       const {logs} = await token.transfer(purchaser, amounts_10, {from: writer}).should.be.fulfilled;
       const xferEvent = logs.find(e => e.event === 'Transfer');
       xferEvent.should.exist;
@@ -290,32 +324,36 @@ function check(accounts, deployTokenCb) {
     });
 
     it('should burn transferring token if writer transfers to zero address', async function() {
-      let amounts_100 = bn.tokens(100);
-      let amounts_70 = bn.tokens(70);
-
-      await token.mint(writer, amounts_100, {from: admin}).should.be.fulfilled;
-      await token.transfer(0x0, amounts_70, {from: writer}).should.be.fulfilled;
+      await token.transfer(0x0, bn.tokens(7000), {from: writer}).should.be.fulfilled;
       let _currentBalance = await token.balanceOf(writer);
       _currentBalance.should.be.bignumber.equal(0);
     });
 
     it('should reject transferring an amount of tokens which is greater than balance', async function() {
-      let amounts_100 = bn.tokens(100);
-      let amounts_10 = bn.tokens(10);
-
-      await token.mint(writer, amounts_100, {from: admin}).should.be.fulfilled;
-      await token.transfer(purchaser, bn.tokens(101), {from: writer}).should.be.rejected;
+      await token.transfer(purchaser, bn.tokens(10001), {from: writer}).should.be.rejected;
     });
 
     it('should reject transferring an amount of max uint256', async function() {
       var totalTokens = await token.INITIAL_SUPPLY();
-      await token.mint(writer, totalTokens, {from: admin}).should.be.fulfilled;
+
+      let {logs} = await token.submitMintRequest(writer, totalTokens, {from: operator}).should.be.fulfilled;
+      let submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+
       await token.transfer(purchaser, bn.MAX_UINT, {from: writer}).should.be.rejected;
     });
 
     it('transferring an amount which exceeds max uint256 should be equivalent 0 tokens', async function() {
       var totalTokens = await token.INITIAL_SUPPLY();
-      await token.mint(writer, totalTokens, {from: admin}).should.be.fulfilled;
+
+      let {logs} = await token.submitMintRequest(writer, totalTokens, {from: operator}).should.be.fulfilled;
+      let submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+
       var balance1Before = await token.balanceOf(writer);
       var balance2Before = await token.balanceOf(purchaser);
       await token.transfer(purchaser, bn.OVER_UINT, {from: writer}).should.be.fulfilled;

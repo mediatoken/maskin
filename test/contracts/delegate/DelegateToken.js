@@ -1,8 +1,9 @@
 const BigNumber = web3.BigNumber;
 const web3ABI = require('web3-eth-abi');
 
-const HasAdmin = artifacts.require("./HasAdmin.sol");
-const BalanceSheet = artifacts.require("./BalanceSheet.sol");
+const HasAdmin      = artifacts.require("./HasAdmin.sol");
+const HasOperator   = artifacts.require("./HasOperator.sol");
+const BalanceSheet  = artifacts.require("./BalanceSheet.sol");
 const bn = require('../helpers/bignumber.js');
 
 const should = require('chai')
@@ -12,17 +13,17 @@ const should = require('chai')
 
 
 function check(accounts, deployTokenCb) {
-  var token;
-  var balanceSheet;
+  const owner         = accounts[0];
+  const admin         = accounts[1];
+  const operator      = accounts[2];
+  const non_owner     = accounts[3];
+  const mandator      = accounts[4];
+  const non_mandator  = accounts[5];
+  const purchaser     = accounts[6];
+  const beneficiary   = accounts[7];
+  const writer        = accounts[8];
 
-  var owner = accounts[0];
-  var admin = accounts[1];
-  var non_owner = accounts[2];
-  var mandator = accounts[3];
-  var non_mandator = accounts[4];
-  var purchaser = accounts[5];
-  var beneficiary = accounts[6];
-  var writer = accounts[7];
+  var token, balanceSheet;
 
   beforeEach(async function () {
     token = await deployTokenCb();
@@ -47,13 +48,35 @@ function check(accounts, deployTokenCb) {
       "stateMutability": "nonpayable",
       "type": "function"
     };
+    const abiAddOperatorFunction = {
+      "constant": false,
+      "inputs": [
+        {
+          "name": "_operator",
+          "type": "address"
+        }
+      ],
+      "name": "addOperator",
+      "outputs": [],
+      "payable": false,
+      "stateMutability": "nonpayable",
+      "type": "function"
+    };
 
     let addAdminFunc = web3ABI.encodeFunctionCall(
       abiAddAdminFunction,
       [admin]
     );
 
+    let addOperatorFunc = web3ABI.encodeFunctionCall(
+      abiAddOperatorFunction,
+      [operator]
+    );
+
     await web3.eth.sendTransaction({from: owner, to: token.address, value: 0, data: addAdminFunc, gas: 3000000});
+
+    web3 = HasOperator.web3;
+    await web3.eth.sendTransaction({from: owner, to: token.address, value: 0, data: addOperatorFunc, gas: 3000000});
   });
 
   describe('setDelegatedFrom()', function() {
@@ -82,9 +105,16 @@ function check(accounts, deployTokenCb) {
   });
 
   describe('delegateTotalSupply()', function() {
+    let _amount = bn.tokens(100);
+    beforeEach(async function() {
+      let {logs} = await token.submitMintRequest(mandator, _amount, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+    });
+
     it('Should allow mandator to get totalSupply', async function() {
-      let _amount = bn.tokens(100);
-      await token.mint(writer, _amount, {from: admin}).should.be.fulfilled;
       await token.setDelegatedFrom(mandator, {from: owner}).should.be.fulfilled;
 
       let _totalSupply = await token.delegateTotalSupply({from : mandator}).should.be.fulfilled;
@@ -92,8 +122,6 @@ function check(accounts, deployTokenCb) {
     });
 
     it('Should reject non-mandator to get totalSupply', async function() {
-      let _amount = bn.tokens(100);
-      await token.mint(writer, _amount, {from: admin}).should.be.fulfilled;
       await token.setDelegatedFrom(mandator, {from: owner}).should.be.fulfilled;
 
       let _totalSupply = await token.delegateTotalSupply({from : non_mandator}).should.be.rejected;
@@ -101,10 +129,17 @@ function check(accounts, deployTokenCb) {
   });
 
   describe('delegateBalanceOf()', function() {
+    beforeEach(async function() {
+      let _amount = bn.tokens(100);
+      let {logs} = await token.submitMintRequest(writer, _amount, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+    });
+
     it('Should allow mandator to get delegateBalanceOf', async function() {
-      let _amount_100 = bn.tokens(100);
       let _amount_70 = bn.tokens(70);
-      await token.mint(writer, _amount_100, {from: admin}).should.be.fulfilled;
       await token.setDelegatedFrom(mandator, {from: owner}).should.be.fulfilled;
 
       let _delegateBalanceOf = await token.delegateBalanceOf(writer, {from : mandator}).should.be.fulfilled;
@@ -112,8 +147,6 @@ function check(accounts, deployTokenCb) {
     });
 
     it('Should reject non-mandator to get delegateBalanceOf', async function() {
-      let _amount = bn.tokens(100);
-      await token.mint(writer, _amount, {from: admin}).should.be.fulfilled;
       await token.setDelegatedFrom(mandator, {from: owner}).should.be.fulfilled;
 
       let _delegateBalanceOf = await token.delegateBalanceOf({from : non_mandator}).should.be.rejected;
@@ -121,8 +154,16 @@ function check(accounts, deployTokenCb) {
   });
 
   describe('delegateTransfer()', function() {
+    beforeEach(async function() {
+      let _amount = bn.tokens(100);
+      let {logs} = await token.submitMintRequest(writer, _amount, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+    });
+
     it('should allow to transfer tokens', async function() {
-      await token.mint(writer, bn.tokens(100), {from: admin}).should.be.fulfilled;
       var balance1Before = await token.balanceOf(writer);
       var balance2Before = await token.balanceOf(purchaser);
       var amount = bn.tokens(10);
@@ -137,7 +178,6 @@ function check(accounts, deployTokenCb) {
     });
 
     it('should reject to transfer tokens by non-mandator', async function() {
-      await token.mint(writer, bn.tokens(100), {from: admin}).should.be.fulfilled;
       var amount = bn.tokens(10);
       await token.setDelegatedFrom(mandator, {from: owner}).should.be.fulfilled;
 
@@ -158,13 +198,22 @@ function check(accounts, deployTokenCb) {
   });
 
   describe('delegateTransferFrom()', function() {
+    var amount = bn.tokens(100);
+    beforeEach(async function() {
+      let _amount = bn.tokens(100);
+      let {logs} = await token.submitMintRequest(writer, _amount, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+    });
+
     it('Should allow tranferFrom ', async function() {
       var amounts_100 = bn.tokens(100);
       var amounts_70 = bn.tokens(70);
       var amounts_60 = bn.tokens(60);
       var amounts_10 = bn.tokens(10);
 
-      await token.mint(writer, amounts_100, {from: admin}).should.be.fulfilled;
       await token.approve(purchaser, amounts_10, {from: writer}).should.be.fulfilled;
       var balance1Before = await token.balanceOf(writer);
       var balance2Before = await token.balanceOf(purchaser);
@@ -180,8 +229,6 @@ function check(accounts, deployTokenCb) {
     });
 
     it('Should reject tranferFrom if the call is called by non_mandator ', async function() {
-      var amount = bn.tokens(100);
-      await token.mint(writer, amount, {from: admin}).should.be.fulfilled;
       await token.approve(purchaser, amount, {from: writer}).should.be.fulfilled;
 
       await token.setDelegatedFrom(mandator, {from: owner}).should.be.fulfilled;
@@ -190,10 +237,13 @@ function check(accounts, deployTokenCb) {
   });
 
   describe('delegateApprove()', function() {
-    var amount;
+    var amount = bn.tokens(100);
     beforeEach(async function () {
-      amount = bn.tokens(100);
-      await token.mint(writer, amount, {from: admin}).should.be.fulfilled;
+      let {logs} = await token.submitMintRequest(writer, amount, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
     });
 
     it('should allow to delegateApprove tokens', async function() {
@@ -208,10 +258,13 @@ function check(accounts, deployTokenCb) {
   });
 
   describe('delegateIncreaseApproval()', function() {
-    var amount;
+    var amount = bn.tokens(100);
     beforeEach(async function () {
-      amount = bn.tokens(100);
-      await token.mint(writer, amount, {from: admin}).should.be.fulfilled;
+      let {logs} = await token.submitMintRequest(writer, amount, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
     });
 
     it('should allow to delegateIncreaseApproval tokens', async function() {
@@ -226,10 +279,13 @@ function check(accounts, deployTokenCb) {
   });
 
   describe('delegateDecreaseApproval()', function() {
-    var amount;
+    var amount = bn.tokens(100);
     beforeEach(async function () {
-      amount = bn.tokens(100);
-      await token.mint(writer, amount, {from: admin}).should.be.fulfilled;
+      let {logs} = await token.submitMintRequest(writer, amount, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
+
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
     });
 
     it('should allow to delegateDecreaseApproval tokens', async function() {
@@ -244,13 +300,16 @@ function check(accounts, deployTokenCb) {
   });
 
   describe('delegateBurn()', function() {
-    var amount;
+    var amount = bn.tokens(100);
     beforeEach(async function () {
-      amount = bn.tokens(100);
-      await token.mint(writer, amount, {from: admin}).should.be.fulfilled;
-    });
-    it('should allow to delegateBurn tokens', async function() {
+      let {logs} = await token.submitMintRequest(writer, amount, {from: operator}).should.be.fulfilled;
+      const submitMintLog = logs.find(e => e.event === 'MintSubmission');
+      submitMintLog.should.exist;
 
+      await token.confirmMintRequest(submitMintLog.args.mintRequestID, {from: admin}).should.be.fulfilled;
+    });
+
+    it('should allow to delegateBurn tokens', async function() {
       await token.setDelegatedFrom(mandator, {from: owner}).should.be.fulfilled;
       await token.delegateBurn(writer, bn.tokens(10), 'delegateBurn', {from: mandator}).should.be.fulfilled;
     });
