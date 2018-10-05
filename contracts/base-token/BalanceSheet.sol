@@ -30,4 +30,12 @@ contract BalanceSheet is ClaimableEx {
   function setBalance(address _addr, uint256 _value) public onlyOwner {
     _balances[_addr] = _value;
   }
+
+  function setBalanceBatch(address[] _addr, uint256[] _value) public onlyOwner {
+    uint256 _count = _addr.length;
+    require(_count == _value.length);
+    for(uint256 _i = 0; _i < _count; _i++) {
+      _balances[_addr[_i]] = _value[_i];
+    }
+  }
 }
