@@ -17,14 +17,6 @@ contract TraceableToken is HasAdmin, StandardToken {
   }
 
   /**
-   * @dev Throws if called by any account that is neither an admin nor the owner.
-   */
-  modifier canTrace() {
-    require(isAdmin(msg.sender) || msg.sender == owner);
-    _;
-  }
-
-  /**
    * @dev Internal function that mints an amount of the token and assigns it to
    * an account. The target address should be added to the token holders list if needed.
    * @param _to Who got the tokens.
@@ -62,11 +54,11 @@ contract TraceableToken is HasAdmin, StandardToken {
     return true;
   }
 
-  function getTheNumberOfHolders() public canTrace view returns (uint256) {
+  function getTheNumberOfHolders() public view returns (uint256) {
     return _holderSet.getTheNumberOfElements();
   }
 
-  function getHolder(uint256 _index) public canTrace view returns (address) {
+  function getHolder(uint256 _index) public view returns (address) {
     return _holderSet.elementAt(_index);
   }
 

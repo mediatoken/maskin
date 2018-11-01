@@ -206,10 +206,6 @@ function check(accounts, deployTokenCb) {
 
       (await token.getTheNumberOfHolders()).should.be.bignumber.equal(4);
     });
-
-    it("should not be called by non-owner", async function () {
-      await token.getTheNumberOfHolders({from: guess}).should.be.rejected;
-    });
   });
 
   describe('getHolder()', function() {
@@ -232,10 +228,6 @@ function check(accounts, deployTokenCb) {
 
       (await token.getHolder(1)).should.be.equal(guess);
       (await token.getHolder(3)).should.be.equal(writer);
-    });
-
-    it("should not be called by non-owner", async function () {
-      await token.getHolder({from: guess}).should.be.rejected;
     });
   });
 };
