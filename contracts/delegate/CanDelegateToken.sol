@@ -63,6 +63,22 @@ contract CanDelegateToken is BurnableToken {
     }
   }
 
+  function getTheNumberOfHolders() public view returns (uint256) {
+    if (!_hasDelegate()) {
+      return super.getTheNumberOfHolders();
+    } else {
+      return delegate.delegateGetTheNumberOfHolders();
+    }
+  }
+
+  function getHolder(uint256 _index) public view returns (address) {
+    if (!_hasDelegate()) {
+      return super.getHolder(_index);
+    } else {
+      return delegate.delegateGetHolder(_index);
+    }
+  }
+
   function _approve(
     address _spender,
     uint256 _value,

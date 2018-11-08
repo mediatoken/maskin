@@ -5,7 +5,6 @@ import './access/HasOperator.sol';
 import './base-token/PausableToken.sol';
 import './delegate/CanDelegateToken.sol';
 import './delegate/DelegateToken.sol';
-import './TraceableToken.sol';
 import './WithdrawalToken.sol';
 import './utils/MintPool.sol';
 
@@ -28,7 +27,7 @@ import './utils/MintPool.sol';
  *  - attempts to reject ether sent and allows any ether held to be transferred out.
  *  - allows the new owner to accept the ownership transfer, the owner can cancel the transfer if needed.
  **/
-contract MaskinToken is HasAdmin, HasOperator, MintPool, CanDelegateToken, DelegateToken, TraceableToken, WithdrawalToken, PausableToken {
+contract MaskinToken is HasAdmin, HasOperator, MintPool, CanDelegateToken, DelegateToken, WithdrawalToken, PausableToken {
   string public name = "MaskinCoin";
   string public symbol = "MAS";
 
